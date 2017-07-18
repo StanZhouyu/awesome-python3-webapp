@@ -28,7 +28,7 @@ async def create_pool(loop, **kw):
 async def select(sql, args, size=None):
     log(sql, args)
     global __pool
-    with (await __pool) as coon:
+    with (await __pool) as conn:
         cur = await conn.cursor(aiomysql.DictCursor)
         await cur.execute(sql.replace('?', '%s'), args or ())
         if size:
@@ -36,7 +36,7 @@ async def select(sql, args, size=None):
         else:
             rs = await cur.fetchall()
         await cur.close()
-        logging.infog('rows returned: %s' % len(rs))
+        logging.info('rows returned: %s' % len(rs))
         return rs
 
 async def execute(sql, args, autocommit=True):
@@ -138,6 +138,7 @@ class ModelMetaclass(type):
         # 构造默认的SELECT, INSERT, UPDATE和DELETE语句
         attrs['__select__'] = 'select `%s`, %s from `%s`' % (primaryKey, ', '.join(escaped_fields), tableName)
         attrs['__insert__'] = 'insert into `%s` (%s, `%s`) values (%s)' % (tableName, ', '.join(escaped_fields), primaryKey, create_args_string(len(escaped_fields) + 1))
+        attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
         return type.__new__(cls, name, bases, attrs)
 
@@ -177,7 +178,7 @@ class Model(dict, metaclass=ModelMetaclass):
     @classmethod
     async def findAll(cls, where=None, args=None, **kw):
         ' find objects by where clause. '
-        sql = [cls,__select__]
+        sql = [cls.__select__]
         if where:
             sql.append('where')
             sql.append(where)
@@ -198,8 +199,8 @@ class Model(dict, metaclass=ModelMetaclass):
                 args.extend(limit)
             else:
                 raise ValueError('Invalid limit value: %s' % str(limit))
-            rs = await select(' '.join(sql), args)
-            return [cls(**r) for r in rs]
+        rs = await select(' '.join(sql), args)
+        return [cls(**r) for r in rs]
 
     @classmethod
     async def findNumber(cls, selectField, where=None, args=None):
